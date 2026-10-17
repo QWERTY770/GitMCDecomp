@@ -1,6 +1,6 @@
 {
   "branches": [
-    "master",
+    "main",
     "20w14infinite",
     "1.16.5",
     "22w13oneblockatatime",
@@ -10,7 +10,7 @@
     "26w14a",
     "26.1.2"
   ],
-  "master": {
+  "main": {
     "type": "main",
     "version_start": "1.14.4"
   },
