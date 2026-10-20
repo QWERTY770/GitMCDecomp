@@ -7,6 +7,7 @@
 scripts/
 ├─ trigger-mc-decompile.ps1   # 主脚本（Windows PowerShell 5.1+，零依赖）
 ├─ trigger-mc-decompile.cmd   # 双击运行用的外壳，带 -ExecutionPolicy Bypass
+├─ trigger-mc-decompile.vbs   # 无窗口启动器，给计划任务用（见「方案 2」）
 └─ README-zh_CN.md            # 本文档
 ```
 
@@ -153,12 +154,17 @@ powershell -ExecutionPolicy Bypass -File .\scripts\trigger-mc-decompile.ps1 -Dry
 
 ### 方案 2：Windows 计划任务（重启后依然有效）
 
+**不要**让任务直接执行 `powershell.exe ... -WindowStyle Hidden`。Windows 会先给
+`powershell.exe` 创建一个**可见**的控制台窗口，PowerShell 启动之后才把它隐藏，所以每次执行
+都会闪一下黑窗。正确做法是让任务执行 `wscript.exe` 去启动 `trigger-mc-decompile.vbs`：
+`wscript.exe` 是 GUI 程序、自身没有控制台，它用 `SW_HIDE` 启动 PowerShell，窗口从第一帧
+起就是隐藏的，看不到任何窗口。
+
 在**普通** PowerShell 窗口执行（创建自己的任务一般不需要管理员）：
 
 ```powershell
-$ps1      = 'D:\java\main\GitMCDecomp\scripts\trigger-mc-decompile.ps1'
-$action   = New-ScheduledTaskAction -Execute 'powershell.exe' `
-              -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ps1`""
+$vbs      = 'D:\java\main\GitMCDecomp\scripts\trigger-mc-decompile.vbs'
+$action   = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument "`"$vbs`""
 $trigger  = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
               -RepetitionInterval (New-TimeSpan -Minutes 5) `
               -RepetitionDuration ([TimeSpan]::FromDays(3650))
@@ -166,10 +172,18 @@ $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances 
 Register-ScheduledTask -TaskName 'GitMCDecomp-trigger' -Action $action -Trigger $trigger -Settings $settings
 ```
 
-等价的 `schtasks` 写法（脚本路径里**没有空格**时可以直接用，否则请用上面的写法）：
+**已经有任务、只想消掉闪窗**（保留原有触发器和设置，只替换执行动作）：
+
+```powershell
+$vbs = 'D:\java\main\GitMCDecomp\scripts\trigger-mc-decompile.vbs'
+Set-ScheduledTask -TaskName 'GitMCDecomp-trigger' `
+  -Action (New-ScheduledTaskAction -Execute 'wscript.exe' -Argument "`"$vbs`"")
+```
+
+等价的 `schtasks` 写法（路径里**没有空格**时可用）：
 
 ```bat
-schtasks /Create /F /TN "GitMCDecomp-trigger" /SC MINUTE /MO 5 /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File D:\java\main\GitMCDecomp\scripts\trigger-mc-decompile.ps1"
+schtasks /Create /F /TN "GitMCDecomp-trigger" /SC MINUTE /MO 5 /TR "wscript.exe D:\java\main\GitMCDecomp\scripts\trigger-mc-decompile.vbs"
 ```
 
 管理它：
@@ -180,23 +194,28 @@ Get-ScheduledTask    -TaskName 'GitMCDecomp-trigger' | Get-ScheduledTaskInfo
 Unregister-ScheduledTask -TaskName 'GitMCDecomp-trigger' -Confirm:$false   # 删除
 ```
 
-注意两点：
+注意：
 
 - 计划任务**不会**继承你当前窗口里的 `$env:GITHUB_TOKEN`，所以 token 必须用 `setx` 或
   token 文件持久化。
-- 窗口是隐藏的，看不到输出，出问题请查 `logs\trigger-workflow.log`。
+- 全程没有任何窗口，看不到输出，出问题请查 `logs\trigger-workflow.log`。
+- `wscript` 会等 PowerShell 跑完并把它的退出码透传给任务，所以任务计划程序里
+  「上次运行结果」`0x0` 表示成功、`0x1` 表示失败，可以直接当监控信号。
 - 不要给计划任务加 `-Wait`，它会长时间占着一个进程。`-Wait` 是给手动排查用的。
+- 调试启动器本身可以手动跑：`wscript.exe scripts\trigger-mc-decompile.vbs -DryRun`。
 
 ### 方案 3：保留 GitHub 的 `schedule` 作为兜底
 
-本地的计划任务负责准时，GitHub 的 cron 留着也无妨。两者叠加时脚本的去重逻辑会防止同一时段
-重复触发；如果两边恰好同时起跑，也可以在 `listen-mc-decompile.yml` 里加一个并发组来兜底：
+本地的计划任务负责准时，GitHub 的 cron 留着也无妨。工作流里已经内置了并发组：
 
 ```yaml
 concurrency:
   group: listen-mc-decompile
   cancel-in-progress: false   # 排队而不是取消
 ```
+
+cron 触发的运行和本地触发的运行共用同一把锁，同一时刻只会有一个运行在跑；再加上脚本自身的
+去重（发现 `queued / in_progress / pending` 就跳过），两边不可能同时向同一个分支 push。
 
 ## 排错
 
