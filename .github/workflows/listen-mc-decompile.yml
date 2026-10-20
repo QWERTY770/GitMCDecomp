@@ -13,6 +13,15 @@ on:
 #  schedule:
 #    - cron: '0/5 * * * *'
 
+# 串行化（防止 GitHub 的 cron 和本地脚本抢同一个分支）：
+# schedule 触发的运行与本地 workflow_dispatch 触发的运行落在同一个并发组里，
+# 同一时刻只允许一个运行在执行，后来者排队，不会并行。
+# cancel-in-progress: false 让正在跑的运行永不被打断（避免 push 到一半被砍掉）；
+# 每个并发组只保留一个排队位，更新的运行会顶掉更早的排队运行，因此不会无限堆积。
+concurrency:
+  group: listen-mc-decompile
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest

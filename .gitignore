@@ -2,3 +2,10 @@
 /.gradle/
 /.idea/
 /build/
+
+# 本地触发脚本（scripts/trigger-mc-decompile.ps1）
+# token 文件与运行日志不能入库
+/.gh-trigger-token
+/logs/
+# 本机环境修复时留下的记录，可随时删除
+/.acl-recovery/
